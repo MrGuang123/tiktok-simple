@@ -5,6 +5,7 @@ import { PrismaService } from 'src/prisma.service';
 import { Request, Response } from 'express';
 import * as bcrypt from 'bcrypt'
 import { User } from '@prisma/client';
+import { LoginDto, RegisterDto } from './dto';
 
 @Injectable()
 export class AuthService {
@@ -74,5 +75,56 @@ export class AuthService {
     response.cookie('refresh_token', refreshToken, { httpOnly: true })
 
     return { user }
+  }
+
+  async validateUser(loginDto: LoginDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: loginDto.email }
+    })
+
+    if (user && (await bcrypt.compare(loginDto.password, user.password))) {
+      return user;
+    }
+
+    return null;
+  }
+
+  async register(registerDto: RegisterDto, response: Response) {
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: registerDto.email }
+    })
+
+    if (!existingUser) {
+      throw new Error('Email already in use')
+    }
+
+    const hashedPassword = await bcrypt.hash(registerDto.password, 10)
+
+    const user = await this.prisma.user.create({
+      data: {
+        fullname: registerDto.fullname,
+        password: hashedPassword,
+        email: registerDto.email
+      }
+    })
+
+    return this.issueTokens(user, response)
+  }
+
+  async login(loginDto: LoginDto, response: Response) {
+    const user = await this.validateUser(loginDto)
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials')
+    }
+
+    return this.issueTokens(user, response)
+  }
+
+  async logout(response: Response) {
+    response.clearCookie('access_token')
+    response.clearCookie('refresh_token')
+
+    return 'Successfully logged out'
   }
 }
